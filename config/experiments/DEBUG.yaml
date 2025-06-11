@@ -1,0 +1,65 @@
+experiment_setup:
+  name: DEBUG
+  experiment_dir: null # set automatically
+  checkpoints_dir: null
+  visualization_dir: null
+  logs_dir: null
+  seed: 42 
+  use_cuda: true
+  deterministic: true
+  visualize: true # last batch of last epoch will be visualized
+
+model:
+  patch_size: 12  # number of points per patch 
+  mask_ratio: 0.3 
+  num_points: 2048 # number points per instance
+  masking_strategy: random # can be 'random', 'block', 'xysplit'
+  encoder_dims: 1024 
+  decoder_dims: 1024
+  mlp_dim: 2048
+  depth: 6
+  num_heads: 8 
+  dim_per_head: 64 
+  dropout: 0.0 
+  loss_alpha_center: 0.1
+
+
+pretraining:
+  epochs: 1
+  batch_size: 1
+  num_workers: 2
+  shuffle: true
+  pin_memory: false
+
+  save_interval: 0
+  resume: false 
+  resume_path: null
+  
+  
+  optimizer:
+    _target_: torch.optim.AdamW 
+    lr: 0.0001
+    weight_decay: 0.0001
+
+  scheduler: 
+    _target_: torch.optim.lr_scheduler.CosineAnnealingLR 
+    T_max: 10
+    eta_min: 0.0001
+
+  dataset:
+    name: ALS_50K
+
+
+finetune: 
+  pretrained: true 
+  epochs: 100 
+  batch_size: 16 
+
+
+
+
+# hydra configuration - no need to change 
+hydra:
+  run:
+    dir: experiments/${experiment_setup.name}
+
