@@ -84,6 +84,16 @@ def training(cfg, logger):
               drop_last=True # to ensure all batches have the same size
 
          )
+    elif cfg.pretraining.dataset.name == 'FORSPECIES':
+        train_loader = DataLoader(
+            FORSPECIES(
+            ), 
+            batch_size=cfg.pretraining.batch_size,
+            shuffle=cfg.pretraining.shuffle,
+            num_workers=cfg.pretraining.num_workers,
+            pin_memory=cfg.pretraining.pin_memory,
+            drop_last=True # to ensure all batches have the same size
+        )
 
     # set device 
     device = torch.device("cuda" if cfg.experiment_setup.use_cuda else "cpu")
@@ -192,7 +202,7 @@ def training(cfg, logger):
             'epoch_cd': chamfer_dist,
         })
 
-        if epoch % cfg.pretraining.save_interval == 0:
+        if epoch % cfg.pretraining.save_interval == 0 and epoch != 0:
             torch.save(model.state_dict(), str(cfg.experiment_setup.checkpoints_dir / f'pretrained_epoch_{epoch}.pth'))
             logger.info(f'Model saved at epoch {epoch}.')
         if epoch == cfg.pretraining.epochs - 1:

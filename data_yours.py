@@ -193,7 +193,7 @@ class FORSPECIES(Dataset):
         super().__init__()
         self.split = split 
         self.mode = mode
-        self.data_file = Path('/home/nibio/mutable-outside-world/code/david_hansen/ssl_single_tree_pool/SingleTreeDB/data/datasets/FORSpecies/FORSpecies_1.0.h5')
+        self.data_file = Path('/share/projects/erasmus/hansend/thesis/data/pretraining/FORSpecies_1.0.h5')
         
         if self.mode == 'pretrain':
             with h5py.File(self.data_file, 'r') as f:
@@ -209,10 +209,10 @@ class FORSPECIES(Dataset):
 
         
         cloud = normalize_pointcloud(cloud)
-        cloud = translate_pointcloud(cloud) 
-        cloud = jitter_pointcloud(cloud)
-        cloud = rotate_pointcloud(cloud)
-        cloud = flip_pointcloud(cloud)
+        #cloud = translate_pointcloud(cloud) 
+        #cloud = jitter_pointcloud(cloud)
+        #cloud = rotate_pointcloud(cloud)
+        #cloud = flip_pointcloud(cloud)
 
 
         return cloud, idx
