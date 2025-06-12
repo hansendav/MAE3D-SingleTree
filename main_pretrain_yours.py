@@ -169,13 +169,14 @@ def training(cfg, logger):
                 'step_cd_pc': chamfer_dist_pc.item(),        
             })
             
-            # Visualization of last batch of last epoch
-            if epoch == cfg.pretraining.epochs - 1 and cfg.experiment_setup.visualize:
-                for i in range(batch_size):
-                    write_plyfile(str(cfg.experiment_setup.visualization_dir / f'train_{index[i].item()}_vis'), vis_pos[i].view(-1, 3))
-                    write_plyfile(str(cfg.experiment_setup.visualization_dir / f'train_{index[i].item()}_mask'), crop_pos[i].view(-1, 3))
-                    write_plyfile(str(cfg.experiment_setup.visualization_dir / f'train_{index[i].item()}_gt'), data[i].permute(1, 0))
-                    write_plyfile(str(cfg.experiment_setup.visualization_dir / f'train_{index[i].item()}_pred'), pred_pc[i].permute(1, 0))
+        # Visualization of last batch of last epoch
+        # Visualize all samples in the last batch of the last epoch (e.g., 16*4 files for 4 visualizations per sample)
+        if epoch == cfg.pretraining.epochs - 1 and cfg.experiment_setup.visualize:
+            for i in range(batch_size):
+                write_plyfile(str(cfg.experiment_setup.visualization_dir / f'train_{index[i].item()}_vis'), vis_pos[i].view(-1, 3))
+                write_plyfile(str(cfg.experiment_setup.visualization_dir / f'train_{index[i].item()}_mask'), crop_pos[i].view(-1, 3))
+                write_plyfile(str(cfg.experiment_setup.visualization_dir / f'train_{index[i].item()}_gt'), data[i].permute(1, 0))
+                write_plyfile(str(cfg.experiment_setup.visualization_dir / f'train_{index[i].item()}_pred'), pred_pc[i].permute(1, 0))
 
         # per epoch 
         scheduler.step()
