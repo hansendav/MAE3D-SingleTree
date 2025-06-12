@@ -166,14 +166,6 @@ class MAE3D(nn.Module):
         self.mask_patch_num = int(self.patch_num * self.cfg.mask_ratio)
         self.vis_patch_num = self.patch_num - self.mask_patch_num
 
-        print(
-            f'Number of points: {self.cfg.num_points}, '
-            f'Patch size: {self.cfg.patch_size}, '
-            f'Mask ratio: {self.cfg.mask_ratio}, '
-            f'Vis patch num: {self.vis_patch_num}, '
-            f'Mask patch num: {self.mask_patch_num}, '
-        )
-        
 
         self.encoder = MAE3DEncoder(cfg)
         self.decoder = MAE3DDecoder(cfg)

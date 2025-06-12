@@ -276,15 +276,11 @@ class ALS_50K(Dataset):
     def __init__(self, num_points=1024):
         super().__init__()
         self.num_points = num_points
-        self.data_file = Path('/share/projects/erasmus/hansend/thesis/data/pretraining/ssl_tree_pretraining_dataset.h5')
-        self.idx_file = Path('/share/projects/erasmus/hansend/thesis/data/pretraining/ssl_tree_pretraining_dataset_subset_idx.csv')
+        self.data_file = Path('/share/projects/erasmus/hansend/thesis/data/pretraining/ALS_50K.h5')
         
-        with open(Path('/share/projects/erasmus/hansend/thesis/data/pretraining/ssl_tree_pretraining_dataset_subset_idx.csv'), 'r') as f: 
-            self.idx = f.readlines()[1:] # skip header
-            self.idx = [int(i.strip()) for i in self.idx]
+        with h5py.File(self.data_file, 'r', swmr=True) as f:
+            self.len = f['data']['instance_xyz'].shape[0]
                 
-        self.len = len(self.idx) 
-
     def __len__(self):
         return self.len 
 

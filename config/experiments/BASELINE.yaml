@@ -1,16 +1,17 @@
-#defaults: 
-  #- data_pretraining: ALS_50K 
-  #- data_downstream: FORAGE
-
 experiment_setup:
-  name: BASELINE
+  name: BASELINE_CUSTOM_PATCHING
+  experiment_dir: null # set automatically
+  checkpoints_dir: null
+  visualization_dir: null
+  logs_dir: null
   seed: 42 
+  use_cuda: true
   deterministic: true
   visualize: true # last batch of last epoch will be visualized
 
 model:
-  patch_size: 16 # number of points per patch 
-  mask_ratio: 0.3 
+  patch_size: 16  # number of points per patch 
+  mask_ratio: 0.3
   num_points: 2048 # number points per instance
   masking_strategy: xysplit # can be 'random', 'block', 'xysplit'
   encoder_dims: 1024 
@@ -24,36 +25,35 @@ model:
 
 
 pretraining:
-  epochs: 300 
-  batch_size: 16 
+  epochs: 100
+  batch_size: 8
+  num_workers: 8
+  shuffle: true
+  pin_memory: false
+
   save_interval: 50
   resume: false 
   resume_path: null
   
+  
   optimizer:
-    _target_: torch.optim.AdamW 
+    _target_: torch.optim.Adam
     lr: 0.0001
     weight_decay: 0.0001
 
   scheduler: 
     _target_: torch.optim.lr_scheduler.CosineAnnealingLR 
-    T_max: 300 
-    eta_min: 0.0 
+    T_max: 100
+    eta_min: 0.0001
+
+  dataset:
+    name: ALS_50K
 
 
 finetune: 
   pretrained: true 
   epochs: 100 
   batch_size: 16 
-
-
-
-
-
-
-
-
-
 
 
 

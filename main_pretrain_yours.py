@@ -81,6 +81,7 @@ def training(cfg, logger):
               shuffle=cfg.pretraining.shuffle,
               num_workers=cfg.pretraining.num_workers,
               pin_memory=cfg.pretraining.pin_memory,
+              drop_last=True # to ensure all batches have the same size
 
          )
 
@@ -122,11 +123,9 @@ def training(cfg, logger):
         idx = 0
         for batch, (data, index) in enumerate(tqdm(train_loader)):
             data = data.float()
-            print(f'Input shape: {data.shape}')
             index = index.long()
             data = data.to(device)
             data = data.permute(0, 2, 1)
-            print(f'Input shape after permute: {data.shape}')
             batch_size = data.size()[0]
 
             optimizer.zero_grad()
