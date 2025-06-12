@@ -222,14 +222,22 @@ class MAE3D(nn.Module):
         )
 
         # 2D grid
-        grids = np.meshgrid(np.linspace(-0.1, 0.1, 8, dtype=np.float32), np.linspace(-0.1, 0.1, 8, dtype=np.float32))
-        self.grids = torch.Tensor(np.array(grids)).view(2, -1)  # (2, 4, 4) -> (2, 16)
+        # grids = np.meshgrid(np.linspace(-0.1, 0.1, 8, dtype=np.float32), np.linspace(-0.1, 0.1, 8, dtype=np.float32))
+        # self.grids = torch.Tensor(np.array(grids)).view(2, -1)  # (2, 4, 4) -> (2, 16)
+
+        grid_size = int(np.sqrt(self.cfg.patch_size))
+        assert grid_size * grid_size == self.cfg.patch_size, "PATCH_SIZE must be a perfect square"
+        grids = np.meshgrid(
+            np.linspace(-0.1, 0.1, grid_size, dtype=np.float32),
+            np.linspace(-0.1, 0.1, grid_size, dtype=np.float32)
+        )
+        self.grids = torch.Tensor(np.array(grids)).view(2, -1)
 
 
     def forward(self, x):
-        #xyz = x.permute(0, 2, 1)  # (32, 1024, 3)
-        xyz = x 
-        print(xyz.shape)
+        print(f'Input shape before permute: {x.shape}')
+        xyz = x.permute(0, 2, 1).contiguous()  # (32, 1024, 3)
+        print(f'Input shape: {xyz.shape}')
         
         batch_size, _, _ = x.size()
 
@@ -245,17 +253,7 @@ class MAE3D(nn.Module):
                 xyz, masking_ratio=self.cfg.mask_ratio, patch_size=self.cfg.patch_size)
         
         batch_idx = torch.arange(batch_size, device=x.device).unsqueeze(-1)
-        print(
-            f'batch_idx: {batch_idx.shape}, \n'
-            f'shuffle_idx: {shuffle_idx.shape}, \n'
-            f'mask_patch_idx: {mask_patch_idx.shape}, \n'
-            f'vis_patch_idx: {vis_patch_idx.shape}, \n'
-            f'mask_pos: {mask_pos.shape}, \n'
-            f'vis_pos: {vis_pos.shape}, \n'
-            f'mask_center_pos: {mask_center_pos.shape}, \n'
-            f'vis_center_pos: {vis_center_pos.shape}'
-        )
-
+    
         # reshuffle
         center_pos = torch.cat((vis_center_pos, mask_center_pos), dim=1)
         center_pos_reshuffle = torch.empty_like(center_pos, device=center_pos.device)
@@ -290,7 +288,6 @@ class MAE3D(nn.Module):
 
         x_full = self.decoder(x_full_reshuffle, x_pos_embed_decoder)
         
-        print(f'x_full shape: {x_full.shape}, x_pos_embed_decoder shape: {x_pos_embed_decoder.shape}')
         # reconstruction
         x_center = self.mlp_center(x_full)
         x_center = x_center.view(-1, 3, self.num_center)

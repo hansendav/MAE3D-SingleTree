@@ -292,7 +292,6 @@ class ALS_50K(Dataset):
         with h5py.File(self.data_file, 'r', swmr=True) as f: 
             instance_xyz = f['data']['instance_xyz'][idx] 
             instance_xyz = instance_xyz.reshape(-1, 3) # (N, 3) 
-            #instance_nheights = f['data']['instance_nheights'][idx]
             
             # FPS supsampling to num_points
             if instance_xyz.shape[0] > self.num_points:
@@ -313,10 +312,7 @@ class ALS_50K(Dataset):
                 point_diff = self.num_points - instance_xyz.shape[0]
                 idxs = np.random.choice(instance_xyz.shape[0], point_diff, replace=True)
                 add_points_xyz = instance_xyz[idxs]
-                jitter = np.clip(0.01 * np.random.randn(add_points_xyz.shape[0], add_points_xyz.shape[1]), -0.02, 0.02)
-                add_points_xyz += jitter
                 instance_xyz = np.concatenate((instance_xyz, add_points_xyz), axis=0)
-                #instance_nheights = np.concatenate((instance_nheights, instance_nheights[idxs] + jitter[:, 2]), axis=0) # add jitter to nheights 
             
                 # augmentations without jitter as it has beend done before to upsample to num_points 
                 # instance_xyz = rotate_pointcloud(instance_xyz)

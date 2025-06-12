@@ -68,7 +68,6 @@ def training(cfg, logger):
         mode='online'
     )
 
-    wandb.finish()
 
     # setup datasets 
 
@@ -123,8 +122,11 @@ def training(cfg, logger):
         idx = 0
         for batch, (data, index) in enumerate(tqdm(train_loader)):
             data = data.float()
+            print(f'Input shape: {data.shape}')
             index = index.long()
             data = data.to(device)
+            data = data.permute(0, 2, 1)
+            print(f'Input shape after permute: {data.shape}')
             batch_size = data.size()[0]
 
             optimizer.zero_grad()
@@ -132,7 +134,7 @@ def training(cfg, logger):
             pred_pc, pred_center, gt_center, vis_pos, crop_pos = model(data)
 
             loss_cd_center = cal_loss_cd(pred_center, gt_center.permute(0, 2, 1))
-            loss_cd_pc = cal_loss_cd(pred_pc, data)
+            loss_cd_pc = cal_loss_cd(pred_pc, data) # data shape [B, 3, N]
             chamfer_dist_pc = cal_loss_cd(pred_pc, data, mode='mean')
 
             loss = loss_cd_pc * cfg.model.loss_alpha_center + loss_cd_center
@@ -157,7 +159,6 @@ def training(cfg, logger):
                 'step_pc_loss': loss_cd_pc.item(),
                 'step_cd_pc': chamfer_dist_pc.item(),        
             })
-
             
             # Visualization of last batch of last epoch
             if epoch == cfg.pretraining.epochs - 1 and cfg.experiment_setup.visualize:
@@ -199,6 +200,7 @@ def training(cfg, logger):
             torch.save(model.state_dict(), str(cfg.experiment_setup.checkpoints_dir / f'pretrained.pth'))
             logger.info(f'Last model saved {epoch}.')
 
+    wandb.finish()
 
 @hydra.main(config_path="config/experiments", version_base=None)
 def main(cfg: DictConfig):

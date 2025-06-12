@@ -285,5 +285,5 @@ def center_split_masking(batch, masking_ratio=0.2, patch_size=16):
 
     shuffle_idx = torch.cat((vis_patch_idx, mask_patch_idx), dim=0)
 
-    return vis_pos, mask_pos, vis_center_pos, mask_center_pos, vis_patch_idx, mask_patch_idx, shuffle_idx
+    return mask_pos, vis_pos, mask_center_pos, vis_center_pos, mask_patch_idx, vis_patch_idx, shuffle_idx
 
