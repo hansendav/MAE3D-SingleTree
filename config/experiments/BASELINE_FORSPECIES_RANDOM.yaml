@@ -1,5 +1,5 @@
 experiment_setup:
-  name: BASELINE_RANDOM_PATCHING_FORSPECIES
+  name: baseline_rand_patching_forspecies
   experiment_dir: null # set automatically
   checkpoints_dir: null
   visualization_dir: null
@@ -30,6 +30,7 @@ pretraining:
   num_workers: 8
   shuffle: true
   pin_memory: true
+  prefetch_factor: 2
 
   save_interval: 50
   resume: false 

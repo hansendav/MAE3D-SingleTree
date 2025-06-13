@@ -81,6 +81,7 @@ def training(cfg, logger):
               shuffle=cfg.pretraining.shuffle,
               num_workers=cfg.pretraining.num_workers,
               pin_memory=cfg.pretraining.pin_memory,
+              prefetch_factor=cfg.pretraining.prefetch_factor,
               drop_last=True # to ensure all batches have the same size
 
          )
@@ -92,6 +93,7 @@ def training(cfg, logger):
             shuffle=cfg.pretraining.shuffle,
             num_workers=cfg.pretraining.num_workers,
             pin_memory=cfg.pretraining.pin_memory,
+            prefetch_factor=cfg.pretraining.prefetch_factor,
             drop_last=True # to ensure all batches have the same size
         )
 

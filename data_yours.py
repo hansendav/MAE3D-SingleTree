@@ -14,6 +14,8 @@ from sklearn.model_selection import train_test_split
 
 import fpsample
 
+import pandas as pd 
+
 
 def normalize_pointcloud(pointcloud: np.ndarray) -> np.ndarray: 
 
@@ -207,12 +209,13 @@ class FORSPECIES(Dataset):
         with h5py.File(self.data_file, 'r', swmr=True) as f: 
             cloud = f[self.split]['clouds'][idx]
 
-        
+        cloud = rotate_pointcloud(cloud)
+        cloud = jitter_pointcloud(cloud)
+        cloud = flip_pointcloud(cloud)
+        cloud = translate_pointcloud(cloud) 
         cloud = normalize_pointcloud(cloud)
-        #cloud = translate_pointcloud(cloud) 
-        #cloud = jitter_pointcloud(cloud)
-        #cloud = rotate_pointcloud(cloud)
-        #cloud = flip_pointcloud(cloud)
+        
+        
 
 
         return cloud, idx
@@ -223,7 +226,7 @@ class FORAGE(Dataset):
     def __init__(self, split='train', fraction=1.0):
         super().__init__()
         self.split = split 
-        self.data_file = Path('/home/nibio/mutable-outside-world/code/david_hansen/ssl_single_tree_pool/SingleTreeDB/data/datasets/FORAge/FORAge_1.0.h5')
+        self.data_file = Path('/share/projects/erasmus/hansend/thesis/data/downstream/FORAge_1.0.h5')
         
         
         with h5py.File(self.data_file, 'r') as f:
@@ -276,7 +279,7 @@ class ALS_50K(Dataset):
     def __init__(self, num_points=1024):
         super().__init__()
         self.num_points = num_points
-        self.data_file = Path('/share/projects/erasmus/hansend/thesis/data/pretraining/ALS_50K.h5')
+        self.data_file = Path('/share/projects/erasmus/hansend/thesis/data/pretraining/ALS_50K_2048.h5')
         
         with h5py.File(self.data_file, 'r', swmr=True) as f:
             self.len = f['data']['instance_xyz'].shape[0]
@@ -290,9 +293,9 @@ class ALS_50K(Dataset):
             instance_xyz = instance_xyz.reshape(-1, 3) # (N, 3) 
             
             # FPS supsampling to num_points
-            if instance_xyz.shape[0] > self.num_points:
-                instance_idxs = fpsample.bucket_fps_kdline_sampling(instance_xyz, self.num_points, h=3)
-                instance_xyz = instance_xyz[instance_idxs]
+            #if instance_xyz.shape[0] > self.num_points:
+            #    instance_idxs = fpsample.bucket_fps_kdline_sampling(instance_xyz, self.num_points, h=3)
+            #    instance_xyz = instance_xyz[instance_idxs]
                 #instance_nheights = instance_nheights[instance_idxs]
 
                 # augmentations with jittering as it is not used here before 
@@ -300,21 +303,26 @@ class ALS_50K(Dataset):
                 # instance_xyz = translate_pointcloud(instance_xyz)
                 # instance_xyz = jitter_pointcloud(instance_xyz)
                 # instance_xyz = flip_pointcloud(instance_xyz)
-                instance_xyz = normalize_pointcloud(instance_xyz)
+                #instance_xyz = normalize_pointcloud(instance_xyz)
 
 
             # adding jittered points to num_points
-            elif instance_xyz.shape[0] < self.num_points: 
-                point_diff = self.num_points - instance_xyz.shape[0]
-                idxs = np.random.choice(instance_xyz.shape[0], point_diff, replace=True)
-                add_points_xyz = instance_xyz[idxs]
-                instance_xyz = np.concatenate((instance_xyz, add_points_xyz), axis=0)
+            # elif instance_xyz.shape[0] < self.num_points: 
+            #     point_diff = self.num_points - instance_xyz.shape[0]
+            #     idxs = np.random.choice(instance_xyz.shape[0], point_diff, replace=True)
+            #     add_points_xyz = instance_xyz[idxs]
+            #     instance_xyz = np.concatenate((instance_xyz, add_points_xyz), axis=0)
             
                 # augmentations without jitter as it has beend done before to upsample to num_points 
                 # instance_xyz = rotate_pointcloud(instance_xyz)
                 # instance_xyz = translate_pointcloud(instance_xyz)
                 # instance_xyz = flip_pointcloud(instance_xyz)
-                instance_xyz = normalize_pointcloud(instance_xyz)
+            instance_xyz = rotate_pointcloud(instance_xyz)
+            instance_xyz = jitter_pointcloud(instance_xyz)
+            instance_xyz = flip_pointcloud(instance_xyz)
+            instance_xyz = translate_pointcloud(instance_xyz) 
+            instance_xyz = normalize_pointcloud(instance_xyz)
+                
         
 
         return instance_xyz, idx #, instance_nheights

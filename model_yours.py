@@ -227,9 +227,7 @@ class MAE3D(nn.Module):
 
 
     def forward(self, x):
-        print(f'Input shape before permute: {x.shape}')
         xyz = x.permute(0, 2, 1).contiguous()  # (32, 1024, 3)
-        print(f'Input shape: {xyz.shape}')
         
         batch_size, _, _ = x.size()
 
