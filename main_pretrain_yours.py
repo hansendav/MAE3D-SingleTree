@@ -26,6 +26,7 @@ from hydra.utils import instantiate
 
 # logging 
 import logging
+import re 
 
 
 
@@ -120,11 +121,20 @@ def training(cfg, logger):
 
     # resume training if specified
     if cfg.pretraining.resume:
-        model.load_state_dict(torch.load(cfg.pretraining.resume_path))
-        logger.info(f'Loaded model from: {cfg.pretraining.resume_path}')
+        checkpoint = torch.load(cfg.pretraining.resume_path)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        start_epoch = checkpoint['epoch'] + 1 
+        logger.info(f'Loaded model and optimizer from: {cfg.pretraining.resume_path}')
+        logger.info(f'Resuming training from epoch {start_epoch}.')
+    else: 
+        start_epoch = 0
+
+
 
     # Pretraining loop 
-    for epoch in range(cfg.pretraining.epochs):
+    for epoch in range(start_epoch, cfg.pretraining.epochs):
         train_center_loss = 0.0
         train_pc_loss = 0.0 
         train_loss = 0.0
@@ -205,11 +215,24 @@ def training(cfg, logger):
             'epoch_cd': chamfer_dist,
         })
 
+        # save model checkpoints
         if epoch % cfg.pretraining.save_interval == 0 and epoch != 0:
-            torch.save(model.state_dict(), str(cfg.experiment_setup.checkpoints_dir / f'pretrained_epoch_{epoch}.pth'))
-            logger.info(f'Model saved at epoch {epoch}.')
+            checkpoint = {
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'epoch': epoch
+            }
+        torch.save(checkpoint, str(cfg.experiment_setup.checkpoints_dir / f'pretrained_epoch_{epoch}.pth'))
+        logger.info(f'Model saved at epoch {epoch}.')
         if epoch == cfg.pretraining.epochs - 1:
-            torch.save(model.state_dict(), str(cfg.experiment_setup.checkpoints_dir / f'pretrained.pth'))
+            checkpoint = {
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'epoch': epoch
+            }
+            torch.save(checkpoint, str(cfg.experiment_setup.checkpoints_dir / f'pretrained.pth'))
             logger.info(f'Last model saved {epoch}.')
 
     wandb.finish()
