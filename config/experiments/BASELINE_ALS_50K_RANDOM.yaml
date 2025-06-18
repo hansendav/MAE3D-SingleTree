@@ -4,6 +4,7 @@ experiment_setup:
   checkpoints_dir: null
   visualization_dir: null
   logs_dir: null
+  results_dir: null
   seed: 42 
   use_cuda: true
   deterministic: true
@@ -20,7 +21,7 @@ model:
   depth: 6
   num_heads: 8 
   dim_per_head: 64 
-  dropout: 0.0 
+  dropout: 0.5
   loss_alpha_center: 0.1
 
 
@@ -51,10 +52,44 @@ pretraining:
     name: ALS_50K
 
 
-finetune: 
+downstream: 
   pretrained: true 
-  epochs: 100 
-  batch_size: 16 
+  task: regression # can be regression or classification for FORage
+  train_type: finetune # can be probing, finetune, or scratch
+  repetitions: 3
+  resume: false 
+  resume_path: null
+
+  epochs: 300
+  batch_size: 16
+  num_workers: 8
+  shuffle: true
+  pin_memory: true
+  prefetch_factor: 2
+  clip_grad_norm: null #1.0 # gradient clipping, set to null to disable
+  clip_grad_value: 1
+  #save_interval: 25 
+
+  optimizer:
+    _target_: torch.optim.Adam
+    lr: 0.0001
+    weight_decay: 0.01
+
+  schedulers: # list of schedulers as they are applied sequentially: pos matters
+  - _target_: torch.optim.lr_scheduler.LinearLR
+    start_factor: 0.1 
+    end_factor: 1.0
+    total_iters: 30
+  - _target_: torch.optim.lr_scheduler.CosineAnnealingLR 
+    T_max: 270
+    eta_min: 0.000001
+
+  dataset:
+    name: FORAGE 
+    fraction: 1.0
+  
+  regression_criterion:
+    _target_: torch.nn.SmoothL1Loss
 
 
 

@@ -2,16 +2,15 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import SequentialLR
 from torch.utils.data import DataLoader
 import numpy as np
 from tqdm import tqdm
 
 
-# models and data imports
-from data import FORAge, FORAge_H5
-from model import MAE3D, MAE3D_reg
-from util import cal_loss,  IOStream
+# model and data imports
+from data_yours import FORAGE, FORSPECIES
+from model_yours import MAE3D, MAE3D_reg, MAE3D_cls
 
 # metrics
 from torchmetrics import R2Score, MeanSquaredError, MeanAbsoluteError
@@ -29,13 +28,16 @@ from hydra.utils import instantiate
 # logging 
 import logging
 
+# dataframes 
+import pandas as pd
+
 
 def _init_(cfg):
         # setup experiment dirs 
         experiment_dir = Path(f'./experiments/{cfg.experiment_setup.name}')
         experiment_dir.mkdir(parents=True, exist_ok=True)
         
-        for i in ['checkpoints', 'visualization', 'logs']:
+        for i in ['checkpoints', 'visualization', 'logs', 'results']:
             (experiment_dir / i).mkdir(parents=True, exist_ok=True)
 
 
@@ -48,6 +50,7 @@ def _init_(cfg):
         cfg.experiment_setup.checkpoints_dir = experiment_dir / 'checkpoints'
         cfg.experiment_setup.visualization_dir = experiment_dir / 'visualization'
         cfg.experiment_setup.logs_dir = experiment_dir / 'logs'
+        cfg.experiment_setup.results_dir = experiment_dir / 'results'
 
         return logger
 
@@ -61,126 +64,163 @@ def _set_reproducability(seed, deterministic=True):
         torch.backends.cudnn.benchmark = False
 
 
-def training
-
-def train(cfg, logger):
-    # setup wandb for loggin metrics 
-    wandb.init(
-        project=f'MAE3D-SingleTree', 
-        name=f'{cfg.experiment_setup.name}_{cfg.mode}',
-        mode='online' # online streaming of metrics
-    )
+def training(cfg, logger):
 
     # setup datasets no other datasets are supported yet
-    if cfg.downstream.dataset == 'FORAGE':
+    if cfg.downstream.dataset.name == 'FORAGE':
         train_loader = DataLoader(
-            FORAge_H5(split='train', fraction=cfg.downstream.limited_ratio),
-            num_workers=cfg.downstream.num_workers, 
-            batch_size=cfg.downstream.batch_size, 
-            shuffle=cfg.downstream.shuffle, 
-            drop_last=cfg.downstream.drop_last,
-            pin_memory=cfg.downstream.pin_memory,
-            prefetch_factor=cfg.downstream.prefetch_factor
-        )
+            FORAGE(
+                split='train',
+                fraction=cfg.downstream.dataset.fraction),
+                num_workers=cfg.downstream.num_workers, 
+                batch_size=cfg.downstream.batch_size, 
+                shuffle=cfg.downstream.shuffle, 
+                drop_last=True,
+                pin_memory=cfg.downstream.pin_memory,
+                prefetch_factor=cfg.downstream.prefetch_factor
+            )
 
         val_loader = DataLoader(
-            FORAge_H5(split='val', fraction=1), # always use full validation set
-            num_workers=cfg.downstream.num_workers, 
-            batch_size=cfg.downstream.val_batch_size, 
-            shuffle=False, # no need to shuffle validation set
-            drop_last=False, # no drop of last for validation
-            pin_memory=cfg.downstream.pin_memory,
-            prefetch_factor=cfg.downstream.prefetch_factor
-        )
+            FORAGE(
+                split='val',
+                fraction=1), # always use full validation set
+                num_workers=cfg.downstream.num_workers, 
+                batch_size=cfg.downstream.batch_size, 
+                shuffle=False, # no need to shuffle validation set
+                drop_last=False, # no drop of last for validation
+                pin_memory=cfg.downstream.pin_memory,
+                prefetch_factor=cfg.downstream.prefetch_factor
+            )
 
         test_loader = DataLoader(
-            FORAge_H5(split='test', fraction=1), # always use full test set
-            num_workers=cfg.downstream.num_workers, 
-            batch_size=cfg.downstream.val_batch_size, 
-            shuffle=False, 
-            drop_last=False,
-            pin_memory=cfg.downstream.pin_memory,
-            prefetch_factor=cfg.downstream.prefetch_factor
-        )
+            FORAGE(
+                split='test',
+                fraction=1), # always use full test set
+                num_workers=cfg.downstream.num_workers, 
+                batch_size=cfg.downstream.batch_size, 
+                shuffle=False, 
+                drop_last=False,
+                pin_memory=cfg.downstream.pin_memory,
+                prefetch_factor=cfg.downstream.prefetch_factor
+            )
 
     # log dataset and fraction information 
     logger.info(
-        f'Using dataset: {cfg.downstream.dataset}, limited ratio: {cfg.downstream.limited_ratio}')
+        f'Using dataset: {cfg.downstream.dataset}')
+    
+    logger.info(f'Resulting in train set size: {len(train_loader.dataset)}')
+    logger.info(f'Resulting in validation set size: {len(val_loader.dataset)}')
+    logger.info(f'Resulting in test set size: {len(test_loader.dataset)}')
 
     # set device
     device = torch.device("cuda" if cfg.experiment_setup.use_cuda else "cpu")
 
-
-
-
-   
-    
-
+    # set repetition lists 
     val_r2_reps = []
     val_rmse_reps = []
     test_r2_reps = []
     test_rmse_reps = []
     
     # FOR EACH REPETITION:
-    for i in range(args.repetitions):
+    for rep in range(cfg.downstream.repetitions):
 
-        writer = SummaryWriter(f'checkpoints/{file_name}/tensorboard/{args.limited_ratio}_rep_{i}')
-
+        # setup new wandb logger 
+        # setup wandb for loggin metrics 
+        wandb.init(
+            project=f'MAE3D-SingleTree', 
+            name=f'{cfg.experiment_setup.name}_{cfg.mode}_{cfg.downstream.dataset.fraction}_{rep+1}',
+            mode='online' # online streaming of metrics
+        )
         
-        model_pretrain = MAE3D(args, encoder_dims=1024, decoder_dims=1024).to(device)
-        model_reg = MAE3D_reg(dropout=args.dropout, encoder_dims=1024).to(device)
+        if cfg.downstream.task == 'regression':
+            model = MAE3D_reg(cfg.model).to(device)
+            logger.info(f'Regression model initialized with cfg: {cfg.model}')
+        elif cfg.downstream.task == 'classification':
+            model = MAE3D_cls(cfg.model).to(device)
+            logger.info(f'Classification model initialized with cfg: {cfg.model}')
         
-        io.cprint(str(model_pretrain))
-        io.cprint(str(model_reg))
 
         # CHANGED loading 
-        if args.pretrained: 
-            print(f'Loading model from: {pretrain_model_path}')
-            pretrained_dict = torch.load(pretrain_model_path)
+        if cfg.downstream.pretrained: 
+            logger.info(
+                f'Loading pretrained model from:\n'
+                f'{cfg.experiment_setup.checkpoints_dir}/pretrained.pth'
+                )
+            model_pretrain = MAE3D(cfg.model).to(device)
+            pretrained_dict = torch.load(f'{cfg.experiment_setup.checkpoints_dir}/pretrained.pth', map_location=device)
+            model_checkpoint = pretrained_dict['model_state_dict']
 
             # extract weights from patch_embed 
-            point_embed_dict = {k: v for k, v in pretrained_dict.items() if 'patch_embed' in k}
+            point_embed_dict = {k: v for k, v in model_checkpoint.items() if 'patch_embed' in k}
 
-            model_reg_dict = model_reg.state_dict() 
+            model_dict = model.state_dict() 
 
+            # set weights in the new model dict
             for k, v in point_embed_dict.items():
-                if k in model_reg_dict and model_reg_dict[k].size() == v.size():
-                    model_reg_dict[k] = v
+                if k in model_dict and model_dict[k].size() == v.size():
+                    model_dict[k] = v
 
-            model_reg.load_state_dict(model_reg_dict, strict=False)
+            model.load_state_dict(model_dict, strict=False)
 
-            io.cprint(f'Pretrained model loaded')
-        
+            logger.info(f'Pretrained patch embedding module loaded.')
         else: 
-            io.cprint(f'No pretrained model loaded.')
+            logger.info(f'Pretrained weights in patch embedding module not loaded.')
 
-
-        if args.linear_classifier:
-            for n, p in model_reg.named_parameters():
+        # freeze patch embedding module if linear classifier 
+        if cfg.downstream.train_type == 'probing':
+            for n, p in model.named_parameters():
                 if n.split('.')[1] == 'patch_embed':
                     p.requires_grad = False
-            io.cprint(f'Linear probing mode. Updating only regression head.')
-        elif args.finetune: 
-            io.cprint(f'Full fine-tuning mode. Updating all parameters (embeding module and regression head).')
-        elif args.from_scratch: 
-            io.cprint(f'Full training from scratch. Updating all parameters (embedding and regressor head). No pretrained weights loaded.')
+            logger.info(f'Linear probing mode. Updating only regression head weights.')
+        # full fine-tuning setup
+        elif cfg.downstream.train_type == 'finetune': 
+            assert cfg.downstream.pretrained is True, f'Fine-tuning requires pretrained to be True.'
+            logger.info(f'Full fine-tuning mode. Updating all parameters (embeding module and regression head).')
+        
+        # from scratch training setup
+        elif cfg.downstream.train_type == 'from_scratch': 
+            assert cfg.downstream.pretrained is False, f'From scratch training requires pretrained to be False.'
+            logger.cprint(f'Full training from scratch. Updating all parameters (embedding and regressor head). No pretrained weights loaded.')
 
         # setup optimizer, schedulr and criterion
-        if args.use_sgd:
-            print("Use SGD")
-            opt = optim.SGD([p for p in model_reg.parameters() if p.requires_grad], lr=args.lr * 100,
-                            momentum=args.momentum, weight_decay=5e-4)
-        else:
-            print("Use Adam")
-            opt = optim.Adam([p for p in model_reg.parameters() if p.requires_grad], lr=args.lr, weight_decay=1e-4)
+        optimizer = instantiate(
+            cfg.pretraining.optimizer, 
+            params=model.parameters() 
+        )
+        logger.info(f'Instantiated optimizer: {cfg.pretraining.optimizer}')
 
+        # setup scheduler 
+        schedulers = [instantiate(scheduler, optimizer=optimizer) for scheduler in cfg.downstream.schedulers]
+        scheduler = SequentialLR(
+            optimizer,
+            schedulers=schedulers,
+            milestones=[schedulers[0].total_iters] # assumin the first scheduler is LinearLR 
+        )
 
-        scheduler = CosineAnnealingLR(opt, args.epochs, eta_min=args.lr)
-        criterion = nn.SmoothL1Loss()
+        logger.info(f'Instantiated schedulers: {cfg.downstream.schedulers}')
+
+        # resume training if specified
+        if cfg.downstream.resume:
+            checkpoint = torch.load(cfg.downstream.resume_path)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            start_epoch = checkpoint['epoch'] + 1 
+            logger.info(f'Loaded model and optimizer from: {cfg.pretraining.resume_path}')
+            logger.info(f'Resuming training from epoch {start_epoch}.')
+        else: 
+            start_epoch = 0
+        
+        # criterion
+        if cfg.downstream.task == 'regression':
+            criterion = instantiate(cfg.downstream.regression_criterion)
+
+        logger.info(f'Using criterion: {criterion}')
         
         # set up torchmetrics, bring to device 
         r2_train = R2Score().to(device)
         mse_train = MeanSquaredError().to(device)
+        mae_train = MeanAbsoluteError().to(device)
 
         r2_val = R2Score().to(device)
         mse_val = MeanSquaredError().to(device)
@@ -189,8 +229,8 @@ def train(cfg, logger):
     
 
 
-        rep = i + 1
-        io.cprint(f'Running repetition {rep} of {args.repetitions}')#
+        i = rep + 1
+        logger.info(f'Running repetition {i} of {cfg.downstream.repetitions}.')
 
         # best rmse, r2 to save best model
         best_val_rmse =  1e10 # best model has to be <
@@ -201,80 +241,81 @@ def train(cfg, logger):
         val_loss = 0.0
         count = 0.0
 
-        for epoch in range(args.epochs):
-            #scheduler.step()
+        for epoch in range(cfg.downstream.epochs):
             train_loss = 0.0
             count = 0.0
-            model_reg.train()
-            total_time = 0.0
+            model.train()
 
+            # reset train metrics for each epoch
             r2_train.reset() 
             mse_train.reset() 
+            mae_train.reset()
 
-            for batch, (data, labels) in enumerate(tqdm(train_loader)):
-                data, labels = data.to(device).float(), labels.squeeze(-1).to(device)
+            for batch, (data, age, species) in enumerate(tqdm(train_loader)):
+                data, age = data.to(device).float(), age.squeeze(-1).to(device)
                 data = data.permute(0, 2, 1) 
                 batch_size = data.size()[0]
 
-                opt.zero_grad()
-                start_time = time.time()
-                preds = model_reg(data)
+                optimizer.zero_grad()
 
-                loss = criterion(preds.squeeze(-1), labels)
+                preds = model(data)
+
+                loss = criterion(preds.squeeze(-1), age)
                 loss.backward()
-                opt.step()
-                end_time = time.time()
-                total_time += (end_time - start_time)
+
+
+                # clip gradients if specified
+                if cfg.downstream.clip_grad_norm is not None:
+                    nn.utils.clip_grad_norm_(model.parameters(), cfg.downstream.clip_grad_norm)
+
+                if cfg.downstream.clip_grad_value is not None:
+                    nn.utils.clip_grad_value_(model.parameters(), cfg.downstream.clip_grad_value)
+
+                optimizer.step()
                 
                 count += batch_size
                 train_loss += loss.item() * batch_size
                 
-                r2_train.update(preds.squeeze(-1), labels) 
-                mse_train.update(preds.squeeze(-1), labels)
+                r2_train.update(preds.squeeze(-1), age) 
+                mse_train.update(preds.squeeze(-1), age)
+                mae_train.update(preds.squeeze(-1), age)
 
 
             # scheduler step after each epoch
+            wandb.log({
+                'lr': optimizer.param_groups[0]['lr'],
+            })
             scheduler.step()
-            print('train total time is', total_time)
             
             epoch_r2 = r2_train.compute().detach().cpu().item()
             epoch_mse = mse_train.compute()
             epoch_rmse = torch.sqrt(epoch_mse).detach().cpu().item()
+            epoch_mae = mae_train.compute().detach().cpu().item()
             
 
-            outstr = 'Train %d, loss: %.6f, train rmse: %.6f, train r2: %.6f' % (
-                epoch,
-                train_loss * 1.0 / count,
-                epoch_rmse, 
-                epoch_r2
-            )
-            io.cprint(outstr)
-
-            writer.add_scalar('train/epoch_loss', train_loss * 1.0 / count, epoch)
-            writer.add_scalar('train/epoch_rmse', epoch_rmse, epoch)
-            writer.add_scalar('train/epoch_r2', epoch_r2, epoch)
-
-            writer.flush()
+            logger.info(f'Train {epoch}, loss: {train_loss * 1.0 / count}, train rmse: {epoch_rmse}, train r2: {epoch_r2}, train mae: {epoch_mae}')
             
-            mae_val.reset()
-            mse_train.reset() 
-            r2_train.reset()
+            wandb.log({
+                'epoch': epoch, 
+                'train/epoch_loss': train_loss * 1.0 / count,
+                'train/epoch_rmse': epoch_rmse,
+                'train/epoch_r2': epoch_r2,
+                'train/epoch_mae': epoch_mae,
+            })
 
+            ### VALIDATION ###
             # validate every 10 epochs, save best model every 10 epochs
             if epoch % 10 == 0:
 
-                ####################
-                # Val
-                ####################
+                logger.info(f'Evaluation on validation set at epoch {epoch}')
+                
                 val_loss = 0.0
                 count = 0.0
                 total_time = 0.0
 
 
                 # set model in evaluation mode 
-                model_reg.eval() 
-
-
+                model.eval() 
 
                 mae_val.reset() 
                 mse_val.reset() 
@@ -283,41 +324,33 @@ def train(cfg, logger):
                 # list for savind predictions and gt
                 gt = []
                 predictions = []
+                species_list = []
 
                 with torch.no_grad():
-                    for data, labels in tqdm(val_loader):
-                        data, labels = data.to(device).float(), labels.squeeze(-1).to(device)
+                    for data, age, species in tqdm(val_loader):
+                        data, age = data.to(device).float(), age.squeeze(-1).to(device)
                         data = data.permute(0, 2, 1)
                         batch_size = data.size()[0]
 
-
-                        start_time = time.time()
-                        preds = model_reg(data)
-                        loss = criterion(preds.squeeze(-1), labels)
-                        end_time = time.time()
-                        total_time += (end_time - start_time)
+                        preds = model(data)
+                        loss = criterion(preds.squeeze(-1), age)
                         
-
                         count += batch_size
                         val_loss += loss.item() * batch_size
 
-                        r2_val.update(preds.squeeze(-1), labels)
-                        mse_val.update(preds.squeeze(-1), labels)
-                        mae_val.update(preds.squeeze(-1), labels)
+                        r2_val.update(preds.squeeze(-1), age)
+                        mse_val.update(preds.squeeze(-1), age)
+                        mae_val.update(preds.squeeze(-1), age)
 
                         # append predictions and gt to list 
-                        gt.append(labels)
+                        gt.append(age)
                         predictions.append(preds)
-                        
-
-                    print('eval total time is', total_time)
-
+                        species_list.append(species)                    
 
                     epoch_val_r2 = r2_val.compute().detach().cpu().item()
                     epoch_val_mse = mse_val.compute()
                     epoch_val_rmse = torch.sqrt(epoch_val_mse).detach().cpu().item()
                     epoch_val_mae = mae_val.compute().detach().cpu().item()
-
                     epoch_val_mbe = torch.mean(torch.cat(predictions) - torch.cat(gt)).detach().cpu().item()
 
                     r2_val.reset()
@@ -325,52 +358,61 @@ def train(cfg, logger):
                     mae_val.reset()
 
 
-                    writer.add_scalar('val/epoch_loss', val_loss * 1.0 / count, epoch)
-                    writer.add_scalar('val/epoch_rmse', epoch_val_rmse, epoch)
-                    writer.add_scalar('val/epoch_r2', epoch_val_r2, epoch)
-                    writer.add_scalar('val/epoch_mae', epoch_val_mae, epoch)
-                    writer.add_scalar('val/epoch_mbe', epoch_val_mbe, epoch)
-                    writer.add_scalar('val/epoch_mse', epoch_val_mse, epoch)
+                    wandb.log({
+                        'val/epoch_loss': val_loss * 1.0 / count,
+                        'val/epoch_rmse': epoch_val_rmse,
+                        'val/epoch_r2': epoch_val_r2,
+                        'val/epoch_mae': epoch_val_mae,
+                        'val/epoch_mbe': epoch_val_mbe,
+                        'val/epoch_mse': epoch_val_mse,
+                        'epoch': epoch
+                    })
 
-                    writer.flush()
-
-                    outstr = f'Validation {epoch}, loss: {(val_loss * 1.0 / count):.2}, val rmse: {epoch_val_rmse:.2}, val r2: {epoch_val_r2:.2}'
-                    io.cprint(outstr)
+                    logger.info(f'Validation {epoch}, loss: {val_loss * 1.0 / count:.4f}, val rmse: {epoch_val_rmse:.4f}, val r2: {epoch_val_r2:.4f}')
 
                     if epoch_val_r2 >= best_val_r2:
                         best_val_r2 = epoch_val_r2
                         best_val_rmse = epoch_val_rmse
 
-                        if args.linear_classifier: 
-                            torch.save(model_reg.state_dict(), f'checkpoints/{file_name}/models/model_reg_lc_limited_{args.limited_ratio}_{rep}.pth')
-                        elif args.finetune: 
-                            torch.save(model_reg.state_dict(), f'checkpoints/{file_name}/models/model_reg_ft_limited_{args.limited_ratio}_{rep}.pth')
+                        checkpoint = {
+                            'model_state_dict': model.state_dict(),
+                            'optimizer_state_dict': optimizer.state_dict(),
+                            'scheduler_state_dict': scheduler.state_dict(),
+                            'epoch': epoch
+                        }
+                        if cfg.downstream.train_type == 'probing': 
+                            torch.save(checkpoint, Path(f'{cfg.experiment_setup.checkpoints_dir}/model_reg_probing_limited_{cfg.downstream.dataset.fraction}_{rep}.pth'))
+                        elif cfg.downstream.train_type == 'finetune': 
+                            torch.save(checkpoint, Path(f'{cfg.experiment_setup.checkpoints_dir}/model_reg_ft_limited_{cfg.downstream.dataset.fraction}_{rep}.pth'))
                         else: 
-                            torch.save(model_reg.state_dict(), f'checkpoints/{file_name}/models/model_reg_scratch_limited_{args.limited_ratio}_{rep}.pth')
+                            torch.save(checkpoint, Path(f'{cfg.experiment_setup.checkpoints_dir}/model_reg_scratch_limited_{cfg.downstream.dataset.fraction}_{rep}.pth'))
                         
-                        outstr = f'Best model RMSE: {best_val_rmse}, R2Score:{best_val_r2}'
-                        io.cprint(outstr)
+                        logger.info(f'Best model RMSE: {best_val_rmse}, R2Score:{best_val_r2}')
 
 
                         # Save predictions
                         gt = torch.cat(gt, dim=0).cpu().numpy()
                         predictions = torch.cat(predictions, dim=0).cpu().numpy()
+                        species_list = torch.cat(species_list, dim=0).cpu().numpy()
 
                         validation_results = pd.DataFrame({
                             'Ground Truth': gt.flatten(),
-                            'Predictions': predictions.flatten()
+                            'Predictions': predictions.flatten(),
+                            'Species': species_list.flatten()
                         })
 
-                        validation_results_file_name = f'validation_results_limited_ratio_{args.limited_ratio}_{rep}.csv'
-                        validation_results.to_csv(os.path.join(args.output_path, validation_results_file_name), index=False)
-                        print(f'Validation rsults saved to {validation_results_file_name}')
+                        # Save validation predictions
+                        validation_results_file_name = f'validation_results_fraction_{cfg.downstream.dataset.fraction}_{rep}.csv'
+                        validation_results.to_csv(
+                            cfg.experiment_setup.results_dir / validation_results_file_name, index=False)
+                        logger.info(f'Validation results saved to {validation_results_file_name}')
 
         val_r2_reps.append(best_val_r2)
         val_rmse_reps.append(best_val_rmse)
-        io.cprint(f'Best validation RMSE: {best_val_rmse}, R2Score:{best_val_r2}')
+        logger.info(f'Best validation RMSE: {best_val_rmse}, R2Score:{best_val_r2}')
 
         ### TESTING ###
-        io.cprint(f'EVALUATION TEST SET:')
+        logger.info(f'Evaluating on test set:')
 
         # reset all metrics
         mae_val.reset()
@@ -378,157 +420,134 @@ def train(cfg, logger):
         r2_val.reset()
 
         # load the best model (see validation)
-        if args.finetune:
-            model_reg.load_state_dict(torch.load(f'checkpoints/{file_name}/models/model_reg_ft_limited_{args.limited_ratio}_{rep}.pth'))
-        elif args.linear_classifier:
-            model_reg.load_state_dict(torch.load(f'checkpoints/{file_name}/models/model_reg_lc_limited_{args.limited_ratio}_{rep}.pth'))
-        elif args.from_scratch:
-            model_reg.load_state_dict(torch.load(f'checkpoints/{file_name}/models/model_reg_scratch_limited_{args.limited_ratio}_{rep}.pth'))
-        model_reg.eval()    
+        if cfg.downstream.train_type == 'finetune':
+            checkpoint_path = cfg.experiment_setup.checkpoints_dir / f'model_reg_ft_limited_{cfg.downstream.dataset.fraction}_{rep}.pth'        
+        elif cfg.downstream.train_type == 'probing':
+            checkpoint_path = cfg.experiment_setup.checkpoints_dir / f'model_reg_probing_limited_{cfg.downstream.dataset.fraction}_{rep}.pth'
+        else:
+            checkpoint_path = cfg.experiment_setup.checkpoints_dir / f'model_reg_scratch_limited_{cfg.downstream.dataset.fraction}_{rep}.pth'
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        logger.info(f'Loaded best model from {checkpoint_path}')
+        
+
+        # evaluation
+        model.eval()
         gt = []
         predictions = []
+        species_list = []
+
         with torch.no_grad():
-            for batch, (data, labels) in enumerate(tqdm(test_loader)):
-                data = data.to(device).float()
+            for batch, (data, age, species) in enumerate(tqdm(test_loader)):
+                data, age = data.to(device).float(), age.squeeze(-1).to(device)
                 data = data.permute(0, 2, 1)
-                gt.append(labels.squeeze(-1).to(device))
+                
+                preds = model(data)
 
-                pred = model_reg(data)
-                predictions.append(pred.cpu())
+                # update metrics 
+                r2_val.update(preds.squeeze(-1), age)
+                mse_val.update(preds.squeeze(-1), age)
+                mae_val.update(preds.squeeze(-1), age)
 
-            # cat gt and predictions
-            gt = torch.cat(gt, dim=0).to(device)
-            predictions = torch.cat(predictions, dim=0).squeeze(-1).to(device)
-            
+                gt.append(age)
+                predictions.append(preds)
+                species_list.append(species)
+
+            # Concatenate all batches
+            gt = torch.cat(gt, dim=0).cpu().numpy()
+            predictions = torch.cat(predictions, dim=0).cpu().numpy()
+            species_list = torch.cat(species_list, dim=0).cpu().numpy()
+
             # Calculate metrics
-            mae = mae_val(predictions, gt)
-            mse = mse_val(predictions, gt)
-            r2 = r2_val(predictions, gt)
-            rmse = torch.sqrt(mse)
-            mbe = torch.mean(predictions - gt)
-            
-            io.cprint(
-                'TEST METRICS: \n'
-                f'MAE: {mae:.2f}, \n'
-                f'MSE: {mse:.2f}, \n'
-                f'RMSE: {rmse:.2f}, \n'
-                f'R2: {r2:.2f}, \n'
-                f'MBE: {mbe:.2f}, \n'
+            mae = mae_val.compute().detach().cpu().item()
+            mse = mse_val.compute().detach().cpu().item()
+            r2 = r2_val.compute().detach().cpu().item()
+            rmse = np.sqrt(mse)
+            mbe = np.mean(predictions - gt)
+
+            logger.info(
+            f'TEST METRICS: \n'
+            f'MAE: {mae:.2f}, \n'
+            f'MSE: {mse:.2f}, \n'
+            f'RMSE: {rmse:.2f}, \n'
+            f'R2: {r2:.2f}, \n'
+            f'MBE: {mbe:.2f}, \n'
             )
 
-            # Save predictions
-            gt = gt.cpu().numpy() 
-            predictions = predictions.cpu().numpy()
-
-            test_results = pd.DataFrame({
-                'Ground Truth': gt.flatten(),
-                'Predictions': predictions.flatten()
+            # Log test metrics to wandb
+            wandb.log({
+            'test/mae': mae,
+            'test/mse': mse,
+            'test/rmse': rmse,
+            'test/r2': r2,
+            'test/mbe': mbe,
             })
 
-            test_results_file_name = f'test_results_limited_ratio_{args.limited_ratio}_{rep}.csv'
-            test_results.to_csv(os.path.join(args.output_path, test_results_file_name), index=False)
-            print(f'Test results saved to {test_results_file_name}')   
+            # Save predictions
+            test_results = pd.DataFrame({
+            'gt': gt.flatten(),
+            'pred': predictions.flatten(),
+            'species': species_list.flatten()
+            })
 
-            test_r2_reps.append(r2.cpu().numpy())
-            test_rmse_reps.append(rmse.cpu().numpy())
+            test_results_file_name = f'test_results_{cfg.downstream.train_type}_{cfg.downstream.dataset.fraction}_{rep}.csv'
+            test_results.to_csv(cfg.experiment_setup.results_dir / test_results_file_name, index=False)
+            logger.info(f'Test results saved to {str(cfg.experiment_setup.results_dir / test_results_file_name)}')   
 
-            io.cprint(f'Best test RMSE: {rmse.cpu().numpy()}, R2Score:{r2.cpu().numpy()}')
+            test_r2_reps.append(r2)
+            test_rmse_reps.append(rmse)
+
+            logger.info(f'Best test RMSE: {rmse}, R2Score:{r2}')
+
+        # end of repetitions loop
+        wandb.finish()
 
     # Save all metrics for all repetitions  
     metrics_df = pd.DataFrame({
-        'Repetition': np.arange(1, args.repetitions + 1),
         'Validation RMSE': val_rmse_reps,
         'Validation R2': val_r2_reps,
         'Test RMSE': test_rmse_reps,
         'Test R2': test_r2_reps
     })
 
-    df_mean = pd.DataFrame(metrics_df.mean(axis=0).round(2))
-    df_std = pd.DataFrame(metrics_df.std(axis=0).round(2))
+    # Calculate mean and std for each metric
+    mean_row = metrics_df.mean().round(2)
+    std_row = metrics_df.std().round(2)
 
-    metrics_df = pd.concat([metrics_df, df_mean.T, df_std.T], axis=0).reset_index(drop=True)
-    metrics_df.index = [f'rep_{i}' for i in range(1, args.repetitions + 1)] + ['mean', 'std']
+    # Append mean and std as new rows
+    metrics_df  = pd.concat([metrics_df, pd.DataFrame([mean_row]), pd.DataFrame([std_row])], ignore_index=True)
 
-    metrics_df.drop(columns=['Repetition'], inplace=True)
+    # Set index names for mean and std
+    metrics_df.index = [f'rep_{i+1}' for i in range(len(val_rmse_reps))] + ['mean', 'std']
+
+    # Save to CSV
+    metrics_save_path = cfg.experiment_setup.results_dir / f'{cfg.downstream.train_type}_{cfg.downstream.dataset.fraction}_allrepetitions.csv'
+    metrics_df.to_csv(metrics_save_path)
+    logger.info(f'Experiment metrics saved to {str(metrics_save_path)}')
+  
+
+@hydra.main(config_path="config/experiments", version_base=None)
+def main(cfg: DictConfig):
+    logger = _init_(cfg)
+
+    # print experiment config -> can also be seen in ./experiment_name/.hydra/config.yaml
+    logger.info(f'Experiment config: {cfg}')
+    logger.info(f'Pretraining dataset config: {cfg.pretraining.dataset.name}')
+
+    # setup reproducability: default seed 42, deterministic=True, benchmark=False
+    _set_reproducability(cfg.experiment_setup.seed, cfg.experiment_setup.deterministic)
+
+    # check if CUDA is available
+    if cfg.experiment_setup.use_cuda:
+        if torch.cuda.is_available():
+            logger.info(f'Using CUDA device: {torch.cuda.get_device_name(0)}')
+        else: 
+            logger.warning('CUDA is not available, using CPU instead.')
+            cfg.pretraining.use_cuda = False
 
 
-    metrics_df.to_csv(os.path.join(args.output_path, f'{args.limited_ratio}_allrepetitions.csv'), index=False)
-    io.cprint(f'Experiment metrics saved to {args.output_path}{args.limited_ratio}_allrepetitions.csv')
-    #io.cprint(f'Experiment metrics: \n{io.cprint(metrics_df)}')
+    # pretraining with wandb logging
+    training(cfg, logger)
 
-if __name__ == "__main__":
-    # Training settings
-    parser = argparse.ArgumentParser(description='Point Cloud Completion Pre-training')
-    parser.add_argument('--exp_name', type=str, default='exp_shapenet55_block', metavar='N',
-                        help='Name of the experiment')
-    parser.add_argument('--mask_ratio', type=float, default=0.7, help='masking ratio')
-    parser.add_argument('--random', type=bool, default=False, metavar='N', help='random masking')
-    parser.add_argument('--patch_size', type=int, default=64, help='patch size')
-
-    parser.add_argument('--dataset', type=str, default='modelnet40', metavar='N',
-                        choices=['modelnet40', 'ScanObjectNN_objectonly', 'ScanObjectNN_objectbg', 'ScanObjectNN_hardest', 'forage', 'forage_h5'])
-    parser.add_argument('--batch_size', type=int, default=32, metavar='batch_size',
-                        help='Size of batch)')
-    parser.add_argument('--test_batch_size', type=int, default=8, metavar='batch_size',
-                        help='Size of batch)')
-    parser.add_argument('--epochs', type=int, default=251, metavar='N',
-                        help='number of episode to train ')
-    parser.add_argument('--use_sgd', type=bool, default=False,
-                        help='Use SGD')
-    parser.add_argument('--lr', type=float, default=0.0001, metavar='LR',
-                        help='learning rate (default: 0.0001, 0.1 if using sgd)')  # 0.00000001
-    parser.add_argument('--momentum', type=float, default=0.7, metavar='M',
-                        help='SGD momentum (default: 0.9)')
-    parser.add_argument('--no_cuda', type=bool, default=False,
-                        help='enables CUDA training')
-    parser.add_argument('--seed', type=int, default=1, metavar='S',
-                        help='random seed (default: 1)')
-
-    parser.add_argument('--num_points', type=int, default=1024,
-                        help='num of points to use')
-    parser.add_argument('--dropout', type=float, default=0.5,
-                        help='dropout rate')
-    parser.add_argument('--limited_ratio', type=float, default=1.0,
-                        help='dropout rate')
-
-    parser.add_argument('--pretrained', type=bool, default=False, metavar='N',
-                        help='Restore model from path')
-
-    parser.add_argument('--finetune', type=bool, default=False, metavar='N',
-                        help='Restore model from path')
-    parser.add_argument('--linear_classifier', type=bool, default=False, metavar='N',
-                        help='random mask')
-    parser.add_argument('--from_scratch', type=bool, default=False, metavar='N')
-    
-    parser.add_argument('--output_path', type=str, default='./')
-    parser.add_argument('--repetitions', type=int, default=1, metavar='N',
-                        help='number of repetitions for the experiment')
-    args = parser.parse_args()
-
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-
-    file_name = 'mask_ratio_' + str(args.mask_ratio) + '/' + args.exp_name
-    pretrain_model_path = './checkpoints/mask_ratio_' + str(args.mask_ratio) + '/' + args.exp_name + '/models/model_pretrain.pth'
-    model_path = './checkpoints/mask_ratio_' + str(args.mask_ratio) + '/' + args.exp_name + '/models/model_reg_ft.pth'
-    _init_()
-
-    io = IOStream('checkpoints/' + file_name + '/run.log')
-    io.cprint(str(args))
-
-    args.cuda = not args.no_cuda and torch.cuda.is_available()
-    torch.manual_seed(args.seed)
-    if args.cuda:
-        io.cprint(
-            'Using GPU : ' + str(torch.cuda.current_device()) + ' from ' + str(torch.cuda.device_count()) + ' devices')
-        torch.cuda.manual_seed(args.seed)
-    else:
-        io.cprint('Using CPU')
-
-    # set seeds for torch cpu and numpy -> cuda already set above
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
-
-    if not os.path.exists(args.output_path):
-        os.makedirs(args.output_path)
-
-    train(args, io, file_name)
+if __name__ == "__main__": 
+    main()

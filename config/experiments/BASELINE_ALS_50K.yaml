@@ -55,11 +55,11 @@ downstream:
   pretrained: true 
   task: regression # can be regression or classification for FORage
   train_type: finetune # can be probing, finetune, or scratch
-  repetitions: 2
+  repetitions: 3
   resume: false 
   resume_path: null
 
-  epochs: 600
+  epochs: 300
   batch_size: 16
   num_workers: 8
   shuffle: true
@@ -78,14 +78,14 @@ downstream:
   - _target_: torch.optim.lr_scheduler.LinearLR
     start_factor: 0.1 
     end_factor: 1.0
-    total_iters: 50
+    total_iters: 30
   - _target_: torch.optim.lr_scheduler.CosineAnnealingLR 
-    T_max: 550
+    T_max: 270
     eta_min: 0.000001
 
   dataset:
     name: FORAGE 
-    fraction: 0.10
+    fraction: 1.0
   
   regression_criterion:
     _target_: torch.nn.SmoothL1Loss

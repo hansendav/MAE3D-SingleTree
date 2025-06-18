@@ -145,8 +145,9 @@ class MAE3D_cls(nn.Module):
 class MAE3D_reg(nn.Module):
     def __init__(self, cfg):
         super(MAE3D_reg, self).__init__()
+        self.cfg = cfg
         self.patch_embed = PatchEmbed_DGCNN(output_channels=self.cfg.encoder_dims)
-        self.head_projection = HeadProj_DGCNN(dropout=self.cfg.dropout, encoder_dims=self.cfg.encoder_dims, output_dims=1)
+        self.head_projection = HeadProj_DGCNN(self.cfg, output_dims=1)
 
         
 

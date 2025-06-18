@@ -223,8 +223,8 @@ def training(cfg, logger):
                 'scheduler_state_dict': scheduler.state_dict(),
                 'epoch': epoch
             }
-        torch.save(checkpoint, str(cfg.experiment_setup.checkpoints_dir / f'pretrained_epoch_{epoch}.pth'))
-        logger.info(f'Model saved at epoch {epoch}.')
+            torch.save(checkpoint, str(cfg.experiment_setup.checkpoints_dir / f'pretrained_epoch_{epoch}.pth'))
+            logger.info(f'Model saved at epoch {epoch}.')
         if epoch == cfg.pretraining.epochs - 1:
             checkpoint = {
                 'model_state_dict': model.state_dict(),

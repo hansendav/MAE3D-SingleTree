@@ -255,6 +255,9 @@ class FORAGE(Dataset):
     def __len__(self):
         if self.split == 'train' and self.fraction < 1.0:
             return len(self.indexes)
+        elif self.split == 'val':
+            with h5py.File(self.data_file, 'r') as f:
+                return f[self.split].attrs['num_instances']
         return self.len 
 
     def __getitem__(self, idx): 
@@ -264,15 +267,27 @@ class FORAGE(Dataset):
         with h5py.File(self.data_file, 'r', swmr=True) as f: 
             cloud = f[self.split]['clouds'][idx]
             age = f[self.split]['age'][idx]
+            species = f[self.split]['species'][idx]
 
+
+        if self.split == 'train':
+            cloud = normalize_pointcloud(cloud)
+            cloud = translate_pointcloud(cloud) 
+            cloud = jitter_pointcloud(cloud)
+            cloud = rotate_pointcloud(cloud)
+            cloud = flip_pointcloud(cloud)
+        
         cloud = normalize_pointcloud(cloud)
-        cloud = translate_pointcloud(cloud) 
-        cloud = jitter_pointcloud(cloud)
-        cloud = rotate_pointcloud(cloud)
-        cloud = flip_pointcloud(cloud)
 
+        
+        species = species.astype(str)
 
-        return cloud, age
+        if species == 'spruce':
+            species = 0 
+        elif species == 'pine':
+            species = 1
+
+        return cloud, age, species
     
 
 class ALS_50K(Dataset): 
