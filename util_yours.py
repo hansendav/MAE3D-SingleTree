@@ -287,3 +287,97 @@ def center_split_masking(batch, masking_ratio=0.2, patch_size=16):
 
     return mask_pos, vis_pos, mask_center_pos, vis_center_pos, mask_patch_idx, vis_patch_idx, shuffle_idx
 
+
+def quadrant_masking(batch, masking_ratio=0.2, patch_size=16): 
+    B, N, C = batch.shape 
+
+    num_patches = N // patch_size
+    num_masked_patches = int(num_patches * masking_ratio)
+    num_vis_patches = num_patches - num_masked_patches
+
+    vis_pos, mask_pos = [], []
+    vis_center_pos, mask_center_pos = [], []
+
+    for i in range(B): 
+        pc = batch[i]
+        t_x = torch.median(pc[:,0])
+        t_y = torch.median(pc[:, 1])
+
+        # Split into quadrants
+        quads = [
+            pc[(pc[:, 0] > t_x) & (pc[:, 1] >= t_y)],  # upper right
+            pc[(pc[:, 0] <= t_x) & (pc[:, 1] >= t_y)], # upper left
+            pc[(pc[:, 0] > t_x) & (pc[:, 1] < t_y)],   # lower right
+            pc[(pc[:, 0] <= t_x) & (pc[:, 1] < t_y)]   # lower left
+        ]
+        
+        for q in quads:
+            print(
+                f"Quadrant size: {q.shape[0]}, "
+            )
+
+        # Always select exactly 2 quadrants as masked (1) and 2 as visible (0)
+        select_idx = np.zeros(4, dtype=int)
+        select_idx[:2] = 1
+        np.random.shuffle(select_idx)
+        masked_quads = [q for q, s in zip(quads, select_idx) if s == 1] # make sure there is at least 1 patch
+        visible_quads = [q for q, s in zip(quads, select_idx) if s == 0]
+
+        for idx, q in enumerate(masked_quads): 
+            to_add = patch_size - q.shape[0]
+            if to_add > 0:
+                # duplicate points to ensure enough points for patching 
+                dupl_idx =  torch.randint(0, len(q), (to_add,), device=q.device)
+                masked_quads[idx] = torch.cat((q, q[dupl_idx]), dim=0)
+        for idx, q in enumerate(visible_quads):
+            to_add = patch_size - q.shape[0]
+            if q.shape[0] < patch_size:
+                # duplicate points to ensure enough points for patching 
+                dupl_idx =  torch.randint(0, len(q), (to_add,), device=q.device)
+                visible_quads[idx] = torch.cat((q, q[dupl_idx]), dim=0)
+
+        # Distribute patches as evenly as possibel
+        
+        patches_per_masked = [num_masked_patches // 2 + (1 if x < num_masked_patches % 2 else 0) for x in range(2)]
+        patches_per_visible = [num_vis_patches // 2 + (1 if x < num_vis_patches % 2 else 0) for x in range(2)] 
+        
+        # get center points and patches masked
+        masked_centers = [] 
+        masked_patches = []
+        for q, n_p in zip(masked_quads, patches_per_masked):
+            # center points
+            centers = pointnet2_utils.furthest_point_sample(q.unsqueeze(0), n_p).squeeze(0)
+            center_points = q[centers]
+            masked_centers.append(center_points)
+            # patches
+            patches_idx = get_kNN_patch_idxs(q, center_points, k=patch_size)
+            patches = [q[patches_idx[:, j]] for j in range(patches_idx.shape[1])]
+            masked_patches.extend(patches)  
+        # get center points and patches vis 
+        vis_centers = [] 
+        vis_patches = [] 
+        for q, n_p in zip(visible_quads, patches_per_visible):
+            # center points
+            centers = pointnet2_utils.furthest_point_sample(q.unsqueeze(0), n_p).squeeze(0)
+            center_points = q[centers]
+            vis_centers.append(center_points)
+            # patches
+            patches_idx = get_kNN_patch_idxs(q, center_points, k=patch_size)
+            patches = [q[patches_idx[:, j]] for j in range(patches_idx.shape[1])]
+            vis_patches.extend(patches)
+        vis_pos.append(torch.stack(vis_patches, dim=0))
+        mask_pos.append(torch.stack(masked_patches, dim=0))
+        vis_center_pos.append(torch.cat(vis_centers, dim=0))
+        mask_center_pos.append(torch.cat(masked_centers, dim=0))
+    
+    vis_pos = torch.stack(vis_pos, dim=0)
+    mask_pos = torch.stack(mask_pos, dim=0)
+    vis_center_pos = torch.stack(vis_center_pos, dim=0)
+    mask_center_pos = torch.stack(mask_center_pos, dim=0)
+
+    idx_all = torch.rand(num_patches).argsort()
+    vis_patch_idx = idx_all[:num_vis_patches]
+    mask_patch_idx = idx_all[num_vis_patches:]
+    shuffle_idx = torch.cat((vis_patch_idx, mask_patch_idx), dim=0)
+
+    return mask_pos, vis_pos, mask_center_pos, vis_center_pos, mask_patch_idx, vis_patch_idx, shuffle_idx

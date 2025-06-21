@@ -71,21 +71,21 @@ downstream:
 
   optimizer:
     _target_: torch.optim.Adam
-    lr: 0.0001
+    lr: 0.0004
     weight_decay: 0.01
 
   schedulers: # list of schedulers as they are applied sequentially: pos matters
   - _target_: torch.optim.lr_scheduler.LinearLR
     start_factor: 0.1 
     end_factor: 1.0
-    total_iters: 30
+    total_iters: 10
   - _target_: torch.optim.lr_scheduler.CosineAnnealingLR 
     T_max: 270
-    eta_min: 0.000001
+    eta_min: 0.000004
 
   dataset:
     name: FORAGE 
-    fraction: 1.0
+    fraction: 0.10
   
   regression_criterion:
     _target_: torch.nn.SmoothL1Loss

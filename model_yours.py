@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from util import split_knn_patches
-from util_yours import center_split_masking
+from util_yours import center_split_masking, quadrant_masking
 import numpy as np
 from einops import rearrange
 
@@ -241,6 +241,9 @@ class MAE3D(nn.Module):
                 xyz, mask_ratio=self.cfg.mask_ratio, nsample=self.cfg.patch_size, random=False)
         elif self.masking_strategy == 'xysplit':
             mask_pos, vis_pos, mask_center_pos, vis_center_pos, mask_patch_idx, vis_patch_idx, shuffle_idx = center_split_masking(
+                xyz, masking_ratio=self.cfg.mask_ratio, patch_size=self.cfg.patch_size)
+        elif self.masking_strategy == 'quadrant':
+            mask_pos, vis_pos, mask_center_pos, vis_center_pos, mask_patch_idx, vis_patch_idx, shuffle_idx = quadrant_masking(
                 xyz, masking_ratio=self.cfg.mask_ratio, patch_size=self.cfg.patch_size)
         
         batch_idx = torch.arange(batch_size, device=x.device).unsqueeze(-1)

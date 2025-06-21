@@ -147,8 +147,12 @@ def training(cfg, logger):
                 f'{cfg.experiment_setup.checkpoints_dir}/pretrained.pth'
                 )
             model_pretrain = MAE3D(cfg.model).to(device)
-            pretrained_dict = torch.load(f'{cfg.experiment_setup.checkpoints_dir}/pretrained.pth', map_location=device)
-            model_checkpoint = pretrained_dict['model_state_dict']
+
+            if cfg.pretraining.dataset.name == 'ALS_50K':
+                pretrained_dict = torch.load(f'{cfg.experiment_setup.checkpoints_dir}/pretrained.pth', map_location=device)
+                model_checkpoint = pretrained_dict['model_state_dict']
+            elif cfg.pretraining.dataset.name == 'FORSPECIES':
+                model_checkpoint = torch.load(f'{cfg.experiment_setup.checkpoints_dir}/pretrained.pth', map_location=device)
 
             # extract weights from patch_embed 
             point_embed_dict = {k: v for k, v in model_checkpoint.items() if 'patch_embed' in k}
@@ -184,7 +188,7 @@ def training(cfg, logger):
 
         # setup optimizer, schedulr and criterion
         optimizer = instantiate(
-            cfg.pretraining.optimizer, 
+            cfg.downstream.optimizer, 
             params=model.parameters() 
         )
         logger.info(f'Instantiated optimizer: {cfg.pretraining.optimizer}')
