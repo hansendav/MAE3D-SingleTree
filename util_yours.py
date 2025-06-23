@@ -310,11 +310,6 @@ def quadrant_masking(batch, masking_ratio=0.2, patch_size=16):
             pc[(pc[:, 0] > t_x) & (pc[:, 1] < t_y)],   # lower right
             pc[(pc[:, 0] <= t_x) & (pc[:, 1] < t_y)]   # lower left
         ]
-        
-        for q in quads:
-            print(
-                f"Quadrant size: {q.shape[0]}, "
-            )
 
         # Always select exactly 2 quadrants as masked (1) and 2 as visible (0)
         select_idx = np.zeros(4, dtype=int)
@@ -323,23 +318,34 @@ def quadrant_masking(batch, masking_ratio=0.2, patch_size=16):
         masked_quads = [q for q, s in zip(quads, select_idx) if s == 1] # make sure there is at least 1 patch
         visible_quads = [q for q, s in zip(quads, select_idx) if s == 0]
 
+        #  check if there are points in each quadrant
+        masked_quads = [q for q in masked_quads if q.shape[0] > 0]
+        visible_quads = [q for q in visible_quads if q.shape[0] > 0]
+                        
+
+        # fall back to the largest quadrant if not enough points in one quadrant
+        if len(masked_quads) == 1: # or sum([q.shape[0] for q in masked_quads]) < patch_size * (num_masked_patches):
+            masked_quads = [torch.cat(masked_quads)]
+
+        if len(visible_quads) == 1: # or sum([q.shape[0] for q in visible_quads]) < patch_size * (num_vis_patches):
+            visible_quads = [torch.cat(visible_quads)]
+
+
+        # # Upsample quadrants if needed to ensure enough points for patching
         for idx, q in enumerate(masked_quads): 
             to_add = patch_size - q.shape[0]
-            if to_add > 0:
-                # duplicate points to ensure enough points for patching 
-                dupl_idx =  torch.randint(0, len(q), (to_add,), device=q.device)
+            if q.shape[0] > 0 and to_add > 0:
+                dupl_idx = torch.randint(0, len(q), (to_add,), device=q.device)
                 masked_quads[idx] = torch.cat((q, q[dupl_idx]), dim=0)
         for idx, q in enumerate(visible_quads):
             to_add = patch_size - q.shape[0]
-            if q.shape[0] < patch_size:
-                # duplicate points to ensure enough points for patching 
-                dupl_idx =  torch.randint(0, len(q), (to_add,), device=q.device)
+            if q.shape[0] > 0 and to_add > 0:
+                dupl_idx = torch.randint(0, len(q), (to_add,), device=q.device)
                 visible_quads[idx] = torch.cat((q, q[dupl_idx]), dim=0)
 
         # Distribute patches as evenly as possibel
-        
-        patches_per_masked = [num_masked_patches // 2 + (1 if x < num_masked_patches % 2 else 0) for x in range(2)]
-        patches_per_visible = [num_vis_patches // 2 + (1 if x < num_vis_patches % 2 else 0) for x in range(2)] 
+        patches_per_masked = [num_masked_patches // len(masked_quads) + (1 if x < num_masked_patches % 2 else 0) for x in range(2)]
+        patches_per_visible = [num_vis_patches // len(visible_quads) + (1 if x < num_vis_patches % 2 else 0) for x in range(2)] 
         
         # get center points and patches masked
         masked_centers = [] 
