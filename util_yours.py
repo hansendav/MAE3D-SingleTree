@@ -4,6 +4,9 @@ import torch.nn.functional as F
 from pointnet2_ops import pointnet2_utils
 import numpy as np
 
+from sklearn.neighbors import kneighbors_graph
+from torch_geometric.utils import from_scipy_sparse_matrix, get_laplacian
+
 
 class ChamferLoss(nn.Module):
 
@@ -387,3 +390,80 @@ def quadrant_masking(batch, masking_ratio=0.2, patch_size=16):
     shuffle_idx = torch.cat((vis_patch_idx, mask_patch_idx), dim=0)
 
     return mask_pos, vis_pos, mask_center_pos, vis_center_pos, mask_patch_idx, vis_patch_idx, shuffle_idx
+
+
+def filter_signal_1d(f, eigenvectors, cutoff_ratio=0.8):
+    """
+    f: 1D torch tensor of shape (num_points,) representing a single coordinate (x, y, or z)
+    eigenvectors: the matrix of eigenvectors from Laplacian decomposition
+    cutoff_ratio: fraction of low frequencies to keep (e.g. 0.8 => keep 80%, remove top 20%)
+    returns: f_filtered, the filtered version of the signal
+    """
+    # Graph Fourier Transform
+    if f.is_cuda or eigenvectors.is_cuda:
+        device = torch.device('cuda')
+    else:
+        device = torch.device('cpu')
+    f = f.to(device)
+    eigenvectors = eigenvectors.to(device)
+
+    f_hat = torch.matmul(eigenvectors.T, f)
+    num_components = f_hat.shape[0]
+    cutoff = int(cutoff_ratio * num_components)
+
+    # Zero out the highest frequencies
+    f_hat_filtered = f_hat.clone()
+    f_hat_filtered[cutoff:] = 0
+
+    # Inverse GFT
+    f_filtered = torch.matmul(eigenvectors, f_hat_filtered)
+    return f_filtered
+
+def filter_pointcloud(pointcloud, cfg): 
+
+    B, N, C = pointcloud.shape
+
+    batch_filtered_points = [] 
+
+    for b in range(B):
+
+        points = pointcloud[b]  # shape: (N, C)
+        points_np = points.cpu().numpy()  # Convert to numpy for sklearn
+        adj_matrix = kneighbors_graph(points_np, cfg.k, mode='connectivity', include_self=False)
+
+        edge_index, edge_weight = from_scipy_sparse_matrix(adj_matrix)
+        num_nodes = points.shape[0]
+
+        edge_index, edge_weight = get_laplacian(edge_index, normalization='sym', num_nodes=num_nodes)
+        L = torch.sparse_coo_tensor(edge_index, edge_weight, (num_nodes, num_nodes)).to_dense()
+
+        L = (L + L.T) / 2
+        L += 1e-6 * torch.eye(num_nodes)
+
+        eigenvalues, eigenvectors = torch.linalg.eigh(L)
+
+        # Extract each coordinate as its own signal
+        f_x = points[:, 0]
+        f_y = points[:, 1]
+        f_z = points[:, 2]
+
+
+        # Define cutoff ratio (keep lower 80%, remove top 20% frequencies)
+        cutoff_ratio = cfg.cutoff_ratio
+
+        # Filter each coordinate
+        f_x_filtered = filter_signal_1d(f_x, eigenvectors, cutoff_ratio) # needs tensor
+        f_y_filtered = filter_signal_1d(f_y, eigenvectors, cutoff_ratio)
+        f_z_filtered = filter_signal_1d(f_z, eigenvectors, cutoff_ratio)
+
+        # Construct the filtered point cloud
+        filtered_points = points.clone()
+        filtered_points[:, 0] = f_x_filtered
+        filtered_points[:, 1] = f_y_filtered
+        filtered_points[:, 2] = f_z_filtered
+        
+        batch_filtered_points.append(filtered_points.unsqueeze(0))
+
+    filtered_points = torch.cat(batch_filtered_points, dim=0)
+
+    return filtered_points

@@ -341,3 +341,5 @@ class ALS_50K(Dataset):
         
 
         return instance_xyz, idx #, instance_nheights
+
+

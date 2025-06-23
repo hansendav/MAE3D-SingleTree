@@ -11,7 +11,7 @@ from tqdm import tqdm
 # model and data imports
 from data_yours import FORAGE, FORSPECIES, ALS_50K
 from model_yours import MAE3D
-from util_yours import cal_loss_cd, write_plyfile
+from util_yours import cal_loss_cd, write_plyfile, filter_pointcloud
 
 
 # wandb for metric logging and visualization 
@@ -122,15 +122,19 @@ def training(cfg, logger):
     # resume training if specified
     if cfg.pretraining.resume:
         checkpoint = torch.load(cfg.pretraining.resume_path)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        start_epoch = checkpoint['epoch'] + 1 
+
+        if 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            start_epoch = checkpoint['epoch'] + 1 
+        else: 
+            model.load_state_dict(checkpoint)
+            start_epoch = 0
         logger.info(f'Loaded model and optimizer from: {cfg.pretraining.resume_path}')
         logger.info(f'Resuming training from epoch {start_epoch}.')
     else: 
         start_epoch = 0
-
 
 
     # Pretraining loop 
@@ -147,6 +151,12 @@ def training(cfg, logger):
             data = data.float()
             index = index.long()
             data = data.to(device)
+
+            # apply filtering in fourier domain if specified 
+            if getattr(cfg.pretraining, "filter_pc", None):
+                data = filter_pointcloud(data, cfg.pretraining.filter_pc)
+                data = data.to(device)
+
             data = data.permute(0, 2, 1)
             batch_size = data.size()[0]
 
