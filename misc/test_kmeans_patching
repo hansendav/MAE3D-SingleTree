@@ -1,0 +1,6 @@
+Version CUDA : 12.1 / CUDNN : cudnn-8-9-cuda12
+Full batch converged at iteration 22/100 with center shifts = tensor([8.0966e-06, 0.0000e+00], device='cuda:0').
+Mask patches: torch.Size([2, 44, 32, 3]), Vis patches: torch.Size([2, 20, 32, 3]),
+Mask centers: torch.Size([2, 44, 3]), Vis centers: torch.Size([2, 20, 3]),
+Mask patch idx: torch.Size([2, 44]), Vis patch idx: torch.Size([2, 20]),
+Shuffle idx: torch.Size([2, 64])

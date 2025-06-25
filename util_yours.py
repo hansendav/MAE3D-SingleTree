@@ -7,6 +7,11 @@ import numpy as np
 from sklearn.neighbors import kneighbors_graph
 from torch_geometric.utils import from_scipy_sparse_matrix, get_laplacian
 
+from torch_kmeans import KMeans
+
+from pointnet2_ops.pointnet2_utils import furthest_point_sample
+
+
 
 class ChamferLoss(nn.Module):
 
@@ -282,7 +287,8 @@ def center_split_masking(batch, masking_ratio=0.2, patch_size=16):
     mask_pos = torch.stack(mask_pos, dim=0)
     mask_center_pos = torch.stack(mask_center_pos, dim=0)
 
-    idx_all = torch.rand(num_patches).argsort()
+    # changed here 
+    idx_all = torch.arange(0, num_patches)
     vis_patch_idx = idx_all[:num_vis_patches]
     mask_patch_idx = idx_all[num_vis_patches:]
 
@@ -419,17 +425,24 @@ def filter_signal_1d(f, eigenvectors, cutoff_ratio=0.8):
     f_filtered = torch.matmul(eigenvectors, f_hat_filtered)
     return f_filtered
 
-def filter_pointcloud(pointcloud, cfg): 
+def frequency_patching(pointcloud, k=10, cutoff_ratio=0.8, patch_size=16, mask_ratio=0.5): 
 
     B, N, C = pointcloud.shape
 
-    batch_filtered_points = [] 
+    num_patches = N // patch_size 
+    num_masked_patches = int(num_patches * mask_ratio) 
+    num_vis_patches = num_patches - num_masked_patches
+
+    vis_patches_batch = [] 
+    mask_patches_batch = []
+    vis_center_pos_batch = []
+    mask_center_pos_batch = []
 
     for b in range(B):
 
         points = pointcloud[b]  # shape: (N, C)
         points_np = points.cpu().numpy()  # Convert to numpy for sklearn
-        adj_matrix = kneighbors_graph(points_np, cfg.k, mode='connectivity', include_self=False)
+        adj_matrix = kneighbors_graph(points_np, k, mode='connectivity', include_self=False)
 
         edge_index, edge_weight = from_scipy_sparse_matrix(adj_matrix)
         num_nodes = points.shape[0]
@@ -449,7 +462,7 @@ def filter_pointcloud(pointcloud, cfg):
 
 
         # Define cutoff ratio (keep lower 80%, remove top 20% frequencies)
-        cutoff_ratio = cfg.cutoff_ratio
+        cutoff_ratio = cutoff_ratio
 
         # Filter each coordinate
         f_x_filtered = filter_signal_1d(f_x, eigenvectors, cutoff_ratio) # needs tensor
@@ -462,8 +475,147 @@ def filter_pointcloud(pointcloud, cfg):
         filtered_points[:, 1] = f_y_filtered
         filtered_points[:, 2] = f_z_filtered
         
-        batch_filtered_points.append(filtered_points.unsqueeze(0))
+        # calculate 3D difference between original and filtered points
+        difference = torch.abs(points - filtered_points)
 
-    filtered_points = torch.cat(batch_filtered_points, dim=0)
+        t = torch.quantile(difference, 0.9)
 
-    return filtered_points
+        mask = difference > t
+
+        masked_points = points[mask.any(dim=1)]
+        vis_points = points[~mask.any(dim=1)]
+
+
+        # get patches based on setting 
+        vis_center_idx = pointnet2_utils.furthest_point_sample(vis_points.unsqueeze(0), num_vis_patches).squeeze(0)
+        vis_center_pos = vis_points[vis_center_idx] 
+
+        mask_center_idx = pointnet2_utils.furthest_point_sample(vis_points.unsqueeze(0), num_vis_patches).squeeze(0)
+        mask_center_pos = masked_points[mask_center_idx]
+
+        # get patches based on kNN 
+        patch_idx = knn_point(patch_size, vis_points.unsqueeze(0), vis_center_pos.unsqueeze(0)).squeeze(0)
+        vis_patches = index_points(vis_points.unsqueeze(0), patch_idx.unsqueeze(0)).squeeze(0)
+
+        patch_idx = knn_point(patch_size, masked_points.unsqueeze(0), mask_center_pos.unsqueeze(0)).squeeze(0)
+        mask_patches = index_points(masked_points.unsqueeze(0), patch_idx.unsqueeze(0)).squeeze(0)
+
+        vis_patches_batch.append(vis_patches)
+        mask_patches_batch.append(mask_patches)
+        vis_center_pos_batch.append(vis_center_pos)
+        mask_center_pos_batch.append(mask_center_pos)
+
+    # Stack the results for the batch
+    vis_pos = torch.stack(vis_patches_batch, dim=0)  
+    mask_pos = torch.stack(mask_patches_batch, dim=0)
+    vis_center_pos = torch.stack(vis_center_pos_batch, dim=0)
+    mask_center_pos= torch.stack(mask_center_pos_batch, dim=0)
+
+    idx_all = torch.arange(0,num_patches)
+    vis_patch_idx = idx_all[:num_vis_patches]
+    mask_patch_idx = idx_all[num_vis_patches:]
+    shuffle_idx = torch.cat((vis_patch_idx, mask_patch_idx), dim=0)
+
+    return mask_pos, vis_pos, mask_center_pos, vis_center_pos, mask_patch_idx, vis_patch_idx, shuffle_idx
+
+
+
+
+
+def gather_patches(points, patch_labels, selected_patch_ids, nsample, expected_patches):
+    """
+    points: [B, N, C] — original point cloud
+    patch_labels: [B, N] — cluster label for each point
+    selected_patch_ids: [B, P] — selected patch indices
+    nsample: int — number of points per patch
+
+    Returns:
+        gathered_patches: [B, P, nsample, C]
+    """
+    B, N, C = points.shape
+    P = selected_patch_ids.shape[1]
+    gathered_patches = []
+
+    for b in range(B):
+        point_set = points[b]       # [N, C]
+        labels = patch_labels[b]    # [N]
+        selected_ids = selected_patch_ids[b]  # [P]
+        patches = []
+
+        for pid in selected_ids:
+            idx = (labels == pid).nonzero(as_tuple=True)[0]
+            n = len(idx)
+            if n == 0: 
+                continue
+    
+            if n < nsample:
+                # Pad by repeating random indices
+                pad_idx = idx[torch.randint(0, n, (nsample - n,), device=points.device)]
+                idx = torch.cat([idx, pad_idx])
+            elif n > nsample:
+                sub_idx = furthest_point_sample(point_set[idx].unsqueeze(0), nsample)  # [1, nsample]
+                idx = sub_idx.squeeze(0)
+            # else: n == nsample, do nothing
+
+            patch = point_set[idx]  # [nsample, C]
+            patches.append(patch)
+
+        patches = torch.stack(patches, dim=0)  # [P, nsample, C]
+
+        if patches.shape[0] < expected_patches: 
+            pad_idx = torch.randint(0, patches.shape[0], (expected_patches - patches.shape[0],), device=points.device)
+            pad_patches = patches[pad_idx]  # [pad, nsample, C]
+            patches = torch.cat([patches, pad_patches], dim=0)
+
+        gathered_patches.append(patches)
+
+
+
+    return torch.stack(gathered_patches, dim=0)  # [B, P, nsample, C]
+
+
+def split_kmeans_patches(batch, mask_ratio=0.7, nsample=32):
+    B, N, C = batch.shape 
+
+    # calculate number of patches
+    num_patches = N // nsample # assuming N is num_points
+    num_masked_patches = int(num_patches * mask_ratio) 
+    num_vis_patches = num_patches - num_masked_patches
+
+    # generate clusters 
+    kmeans_model = KMeans(n_clusters=num_patches) 
+    cluster_results = kmeans_model(batch)
+
+    cl_idx = cluster_results.labels 
+    cl_centroids = cluster_results.centers 
+
+    shuffle_idx = torch.randperm(num_patches*B).reshape(B, num_patches).argsort(dim=1)
+    vis_patch_idx, mask_patch_idx = shuffle_idx[:, :num_vis_patches], shuffle_idx[:, num_vis_patches:] 
+
+    vis_center_pos = torch.gather(cl_centroids, 1, vis_patch_idx.unsqueeze(-1).expand(-1, -1, cl_centroids.shape[-1]).cuda())
+    mask_center_pos = torch.gather(cl_centroids, 1, mask_patch_idx.unsqueeze(-1).expand(-1, -1, cl_centroids.shape[-1]).cuda())
+
+    # gather pos 
+    vis_pos = gather_patches(batch, cl_idx, vis_patch_idx, nsample, num_vis_patches)
+    mask_pos = gather_patches(batch, cl_idx, mask_patch_idx, nsample, num_masked_patches)
+
+
+    return mask_pos, vis_pos, mask_center_pos, vis_center_pos, mask_patch_idx, vis_patch_idx, shuffle_idx
+
+
+class stepwise_scheduler():
+    def __init__(self, schedule, default_value=None): 
+        self.schedule = schedule 
+        self.default_value = default_value
+
+        self.schedule = sorted(schedule, key=lambda x: x[0])
+
+        if self.default_value is None: 
+            self.default_value = self.schedule[-1][1] # first value as default 
+
+    def __call__(self, epoch): 
+        for i, (e, v) in enumerate(self.schedule): 
+            if epoch < e:
+                return self.schedule[i - 1][1] 
+            elif (epoch > e or epoch == e) and i == len(self.schedule) - 1:
+                return v
