@@ -198,22 +198,35 @@ class FORSPECIES(Dataset):
         self.split = split 
         self.mode = mode
         self.data_file = Path('/share/projects/erasmus/hansend/thesis/data/pretraining/FORSpecies_1.0.h5')
-        
-        if self.mode == 'pretrain':
-            with h5py.File(self.data_file, 'r') as f:
-                self.len = f[self.split]['clouds'].shape[0]
-        elif self.mode == 'finetune': 
-            with h5py.File(self.data_file, 'r') as f:
-                self.len = f[self.split]['clouds'].shape[0]
-        elif self.mode == 'evaluation':
-            with h5py.File(self.data_file, 'r') as f:
-                self.len = f[self.split]['clouds'].shape[0]
+        self.fraction = fraction
 
+        with h5py.File(self.data_file, 'r') as f:
+            self.len = f[self.split]['clouds'].shape[0]
+
+        # Fraction-based sampling for train split
+        if self.split == 'train' and self.fraction < 1.0:
+            with h5py.File(self.data_file, 'r') as f:
+                species = f[self.split]['species'][:]
+                # Convert bytes to str if needed
+                species = [re.findall(r"'([^']*)'", str(s))[0] if isinstance(s, bytes) or isinstance(s, np.bytes_) else str(s) for s in species]
+                selection_df = pd.DataFrame(species, columns=['species'])
+            # Stratified sampling by species
+            indexes, _ = train_test_split(
+                selection_df,
+                train_size=self.fraction,
+                stratify=selection_df['species'],
+                random_state=42
+            )
+            self.indexes = indexes.index.to_list()
+            self.len = len(self.indexes)
 
     def __len__(self):
         return self.len 
 
     def __getitem__(self, idx): 
+        # Use fraction-based indexes if needed
+        if self.split == 'train' and self.fraction < 1.0:
+            idx = self.indexes[idx]
 
         if self.mode == 'pretrain' and self.split == 'train':
             with h5py.File(self.data_file, 'r', swmr=True) as f: 
