@@ -16,6 +16,8 @@ import fpsample
 
 import pandas as pd 
 
+import re 
+
 
 def normalize_pointcloud(pointcloud: np.ndarray) -> np.ndarray: 
 
@@ -191,7 +193,7 @@ class FORSpecies(Dataset):
         return len(self.data_list)
 
 class FORSPECIES(Dataset): 
-    def __init__(self, split='train', mode='pretrain'):
+    def __init__(self, split='train', mode='pretrain', fraction=1.0):
         super().__init__()
         self.split = split 
         self.mode = mode
@@ -200,26 +202,58 @@ class FORSPECIES(Dataset):
         if self.mode == 'pretrain':
             with h5py.File(self.data_file, 'r') as f:
                 self.len = f[self.split]['clouds'].shape[0]
+        elif self.mode == 'finetune': 
+            with h5py.File(self.data_file, 'r') as f:
+                self.len = f[self.split]['clouds'].shape[0]
+        elif self.mode == 'evaluation':
+            with h5py.File(self.data_file, 'r') as f:
+                self.len = f[self.split]['clouds'].shape[0]
 
 
     def __len__(self):
         return self.len 
 
     def __getitem__(self, idx): 
-        with h5py.File(self.data_file, 'r', swmr=True) as f: 
-            cloud = f[self.split]['clouds'][idx]
 
-        cloud = rotate_pointcloud(cloud)
-        cloud = jitter_pointcloud(cloud)
-        cloud = flip_pointcloud(cloud)
-        cloud = translate_pointcloud(cloud) 
-        cloud = normalize_pointcloud(cloud)
+        if self.mode == 'pretrain' and self.split == 'train':
+            with h5py.File(self.data_file, 'r', swmr=True) as f: 
+                cloud = f[self.split]['clouds'][idx]
+
+                cloud = rotate_pointcloud(cloud)
+                cloud = jitter_pointcloud(cloud)
+                cloud = flip_pointcloud(cloud)
+                cloud = translate_pointcloud(cloud) 
+                cloud = normalize_pointcloud(cloud)
+
+                return cloud, idx 
         
-        
+        elif self.mode == 'finetune' and self.split == 'train':
+            with h5py.File(self.data_file, 'r', swmr=True) as f: 
+                cloud = f[self.split]['clouds'][idx]
+                species = f[self.split]['species'][idx]
+                species = re.findall(r"'([^']*)'", str(species))[0] 
 
+                cloud = rotate_pointcloud(cloud)
+                cloud = jitter_pointcloud(cloud)
+                cloud = flip_pointcloud(cloud)
+                cloud = translate_pointcloud(cloud) 
+                cloud = normalize_pointcloud(cloud)
 
-        return cloud, idx
-    
+                return cloud, species, idx 
+            
+        elif self.mode == 'evaluation' and self.split == 'val':
+            with h5py.File(self.data_file, 'r', swmr=True) as f:
+                cloud = f[self.split]['clouds'][idx]
+                species = f[self.split]['species'][idx]
+                species = re.findall(r"'([^']*)'", str(species))[0]
+
+                return cloud, species, idx
+
+        elif self.mode == 'evaluation' and self.split == 'test':
+            with h5py.File(self.data_file, 'r', swmr=True) as f:
+                cloud = f[self.split]['clouds'][idx]
+
+                return cloud, idx
 
 
 class FORAGE(Dataset): 
