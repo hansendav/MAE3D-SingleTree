@@ -200,6 +200,10 @@ class FORSPECIES(Dataset):
         self.data_file = Path('/share/projects/erasmus/hansend/thesis/data/pretraining/FORSpecies_1.0.h5')
         self.fraction = fraction
 
+
+        # species mapping 
+        self.species_to_idx, self.idx_to_species = self._create_species_mapping()
+
         with h5py.File(self.data_file, 'r') as f:
             self.len = f[self.split]['clouds'].shape[0]
 
@@ -219,6 +223,20 @@ class FORSPECIES(Dataset):
             )
             self.indexes = indexes.index.to_list()
             self.len = len(self.indexes)
+
+    def _create_species_mapping(self): 
+        with h5py.File(self.data_file, 'r') as f:
+            all_species = set()
+            for split in ['train', 'val']:
+                species = f[split]['species'][:]
+                species = [re.findall(r"'([^']*)'", str(s))[0] for s in species]
+                all_species.update(species)
+
+        unique_species = sorted(list(all_species))
+        species_to_idx = {species: idx for idx, species in enumerate(unique_species)}
+        idx_to_species = {idx: species for idx, species in enumerate(unique_species)}
+        
+        return species_to_idx, idx_to_species
 
     def __len__(self):
         return self.len 
@@ -245,6 +263,7 @@ class FORSPECIES(Dataset):
                 cloud = f[self.split]['clouds'][idx]
                 species = f[self.split]['species'][idx]
                 species = re.findall(r"'([^']*)'", str(species))[0] 
+                species = self.species_to_idx[species]
 
                 cloud = rotate_pointcloud(cloud)
                 cloud = jitter_pointcloud(cloud)
@@ -259,6 +278,7 @@ class FORSPECIES(Dataset):
                 cloud = f[self.split]['clouds'][idx]
                 species = f[self.split]['species'][idx]
                 species = re.findall(r"'([^']*)'", str(species))[0]
+                species = self.species_to_idx[species]
 
                 return cloud, species, idx
 
